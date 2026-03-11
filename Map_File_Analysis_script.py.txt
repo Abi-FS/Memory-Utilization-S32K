@@ -1,0 +1,93 @@
+import re
+import pandas as pd
+import sys
+
+def parse_detailed_map(file_path):
+    # Expanded Regex to capture specific S32K144 sections:
+    # .text, .data, .bss, .rodata, .interrupts, .FlashConfig, .code_ram, etc.
+    detail_pattern = re.compile(r"^\s+\.([a-zA-Z0-9_]+)\S*\s+(0x[0-9a-fA-F]+)\s+(0x[0-9a-fA-F]+)\s+(.*\.o|.*\.a\(.*\))")
+    
+    data_list = []
+    
+    try:
+        with open(file_path, 'r') as f:
+            for line in f:
+                match = detail_pattern.match(line)
+                if match:
+                    section_base, addr, size_hex, obj_file = match.groups()
+                    size_bytes = int(size_hex, 16)
+                    
+                    if size_bytes > 0:
+                        filename = obj_file.split('/')[-1].split('\\')[-1]
+                        
+                        # Full section name for granular reporting
+                        full_section = f".{section_base}"
+                        
+                        # Categorize based on S32K144 Memory Layout 
+                        is_rom = False
+                        is_ram = False
+                        
+                        # ROM (Flash) Categories 
+                        if section_base in ['text', 'rodata', 'interrupts', 'FlashConfig', 'init_array', 'fini_array']:
+                            is_rom = True
+                        
+                        # RAM Categories [cite: 20, 22, 25, 91]
+                        elif section_base in ['bss', 'stack', 'heap', 'interrupts_ram', 'code_ram']:
+                            is_ram = True
+                            
+                        # Data is unique: Stored in ROM, but lives in RAM 
+                        elif section_base == 'data':
+                            is_rom = True
+                            is_ram = True
+
+                        data_list.append({
+                            "Filename": filename,
+                            "Section": full_section,
+                            "Size (Bytes)": size_bytes,
+                            "Address": addr,
+                            "Used in ROM": is_rom,
+                            "Used in RAM": is_ram
+                        })
+
+        if not data_list:
+            print("No detailed section data found. Check if your map file format matches GCC.")
+            return
+
+        df = pd.DataFrame(data_list)
+
+        # 1. File-Wise Summary (Total impact on Flash)
+        file_summary = df.groupby('Filename')['Size (Bytes)'].sum().reset_index()
+        file_summary = file_summary.sort_values(by='Size (Bytes)', ascending=False)
+
+        # 2. Section-Wise Summary
+        section_summary = df.groupby('Section')['Size (Bytes)'].sum().reset_index()
+        
+        # 3. Calculate S32K144 Specific Totals 
+        total_rom = df[df['Used in ROM'] == True]['Size (Bytes)'].sum()
+        total_ram = df[df['Used in RAM'] == True]['Size (Bytes)'].sum()
+
+        summary_data = [
+            {"Metric": "Flash Usage (ROM)", "Bytes": total_rom, "KB": round(total_rom/1024, 2), "Limit (KB)": 512.0},
+            {"Metric": "SRAM Usage (RAM)", "Bytes": total_ram, "KB": round(total_ram/1024, 2), "Limit (KB)": 64.0}
+        ]
+        summary_df = pd.DataFrame(summary_data)
+        summary_df['Usage %'] = round((summary_df['KB'] / summary_df['Limit (KB)']) * 100, 2)
+
+        # Export to Excel
+        output_file = "S32K144_Memory_Report.xlsx"
+        with pd.ExcelWriter(output_file) as writer:
+            summary_df.to_excel(writer, sheet_name='Overall Summary', index=False)
+            file_summary.to_excel(writer, sheet_name='File-Wise Impact', index=False)
+            section_summary.to_excel(writer, sheet_name='Section-Wise Usage', index=False)
+            df.to_excel(writer, sheet_name='Raw Detailed Data', index=False)
+
+        print(f"Analysis complete! S32K144 report generated: {output_file}")
+
+    except Exception as e:
+        print(f"Error: {e}")
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python analyze_detailed.py <map_file>")
+    else:
+        parse_detailed_map(sys.argv[1])
