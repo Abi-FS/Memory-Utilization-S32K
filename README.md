@@ -74,13 +74,14 @@ These sections are used during runtime.
 | `.data`    | Initialized global and static variables. Stored in Flash but copied to RAM by the startup code so they can be modified. |
 | `.bss`     | Uninitialized global and static variables (or those set to 0). Takes up no space in
 
-How to Run the GCC Map Parser
+
+### How to Run the GCC Map Parser
 This parser analyzes GCC generated .map files to help you optimize embedded memory usage.
 Make sure you have Python 3.x installed.
 To run the parser, open your terminal or command prompt and use the following command structure:
 python <map_parser.py> <sample.map>
 
-Quick Start:
+### Quick Start:
 # Clone repo and parse
 git clone <your-repo>
 cd <repo>
